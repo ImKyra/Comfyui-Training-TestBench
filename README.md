@@ -35,8 +35,6 @@ This node automatically generates all combinations of prompts and LoRAs for batc
 - `lora_directory`: Directory to scan for LoRAs, or use "(use lora_names field)" to manually list
 - `lora_strength_model`: LoRA strength for the model (default: 1.0, range: -20.0 to 20.0)
 - `lora_strength_clip`: LoRA strength for CLIP (default: 1.0, range: -20.0 to 20.0)
-- `lora_range_start`: Filter LoRAs by number in filename (0 = disabled, e.g., 2000)
-- `lora_range_end`: Filter LoRAs by number in filename (0 = disabled, e.g., 4000)
 - `prompt` (optional input): Single prompt override
 - `negative_prompt` (optional input): Single negative prompt override
 
@@ -50,13 +48,13 @@ This node automatically generates all combinations of prompts and LoRAs for batc
 - `negative_prompts`: Negative prompt texts used
 
 **Example:**
-With 3 prompts and 2 LoRAs, this node generates **6 combinations** automatically processed in batch.
+With 3 prompts and 2 LoRAs, this node generates **6 images** automatically processed in batch. Each prompt processed for one LoRA, then proceeds to the next LoRA, and so on.
 
 **Special features:**
+- Can use a whole directory and filter a range
 - Supports `<lora:name:strength>` format for per-LoRA strength control (e.g., `<lora:style_lora:0.8>`)
 - Auto-detects file extensions (`.safetensors`, `.ckpt`, `.pt`, `.bin`)
 - Searches subdirectories recursively
-- Can work without LoRAs (outputs `no_lora` combinations)
 
 ### 2. Image Annotator
 
@@ -133,7 +131,7 @@ Enhanced image saving node that embeds prompt and LoRA information in PNG metada
 - Overrides `lora_names` field when directory is selected
 - **LoRA range filtering**: Use `lora_range_start` and `lora_range_end` to filter by numbers in filenames
   - Example: Files named `model_000007420.safetensors` to `model_000007630.safetensors`
-  - Set range to `7420` - `7630` to load only those files
+  - Set range to `7420` - `7630` to load only the files in this range
   - Filter extracts the largest number from each filename
   - Both values set to `0` = disabled (loads all LoRAs)
 
