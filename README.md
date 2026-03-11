@@ -26,8 +26,8 @@ This node automatically generates all combinations of prompts and LoRAs for batc
 - `negative_prompts`: List of negative prompts (one per line, optional)
 - `lora_names`: List of LoRA names (one per line, **extensions optional**)
 - `lora_directory`: Directory to scan for LoRAs, or use "(use lora_names field)" to manually list
-- `lora_strength_model`: LoRA strength for the model (default: 1.0, range: -20.0 to 20.0)
-- `lora_strength_clip`: LoRA strength for CLIP (default: 1.0, range: -20.0 to 20.0)
+- `lora_strength_model`: LoRA strength for the model
+- `lora_strength_clip`: LoRA strength for CLIP
 - `prompt` (optional input): Single prompt override
 - `negative_prompt` (optional input): Single negative prompt override
 
@@ -41,13 +41,13 @@ This node automatically generates all combinations of prompts and LoRAs for batc
 - `negative_prompts`: Negative prompt texts used
 
 **Example:**
-With 3 prompts and 2 LoRAs, this node generates **6 combinations** automatically processed in batch.
+With 3 prompts and 2 LoRAs, this node generates **6 images** automatically processed in batch. Each prompt processed for one LoRA, then proceeds to the next LoRA, and so on.
 
 **Special features:**
+- Can use a whole directory and filter a range
 - Supports `<lora:name:strength>` format for per-LoRA strength control (e.g., `<lora:style_lora:0.8>`)
 - Auto-detects file extensions (`.safetensors`, `.ckpt`, `.pt`, `.bin`)
 - Searches subdirectories recursively
-- Can work without LoRAs (outputs `no_lora` combinations)
 
 ### 2. Image Annotator
 
