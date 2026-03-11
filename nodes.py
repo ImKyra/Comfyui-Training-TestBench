@@ -1,31 +1,21 @@
-"""
-ComfyUI Batch Prompt & LoRA Testing Extension
-Allows testing multiple prompts with multiple LoRAs automatically
-"""
+"""ComfyUI Batch Prompt & LoRA Testing Extension"""
 
 class PromptLoraTestBench:
-    """
-    Node that generates all combinations of prompts and LoRAs
-    """
+    """Generates all combinations of prompts and LoRAs"""
 
     @classmethod
     def INPUT_TYPES(cls):
         import folder_paths
         import os
 
-        # Get LoRA directories
         lora_paths = folder_paths.get_folder_paths("loras")
-
-        # Collect all subdirectories
         subdirs = ["(use lora_names field)"]
+
         for base_path in lora_paths:
             if os.path.exists(base_path):
-                # Add base directory
                 subdirs.append(base_path)
-                # Add all subdirectories
-                for root, dirs, files in os.walk(base_path):
-                    for d in dirs:
-                        subdirs.append(os.path.join(root, d))
+                for root, dirs, _ in os.walk(base_path):
+                    subdirs.extend(os.path.join(root, d) for d in dirs)
 
         return {
             "required": {
@@ -68,9 +58,9 @@ class PromptLoraTestBench:
             }
         }
 
-    RETURN_TYPES = ("MODEL", "CLIP")
-    RETURN_NAMES = ("model", "clip")
-    OUTPUT_IS_LIST = (True, True)
+    RETURN_TYPES = ("MODEL", "CLIP", "CONDITIONING", "CONDITIONING", "STRING")
+    RETURN_NAMES = ("model", "clip", "positive", "negative", "lora_names")
+    OUTPUT_IS_LIST = (True, True, True, True, True)
     FUNCTION = "generate_combinations"
     CATEGORY = "testing"
 
@@ -81,177 +71,220 @@ class PromptLoraTestBench:
         import folder_paths
         import re
 
-        # Use override inputs if provided
-        if prompt is not None:
-            prompts = prompt
-        if negative_prompt is not None:
-            negative_prompts = negative_prompt
+        prompts = prompt if prompt is not None else prompts
+        negative_prompts = negative_prompt if negative_prompt is not None else negative_prompts
 
-        # Parse inputs
         prompt_list = [p.strip() for p in prompts.strip().split('\n') if p.strip()]
         negative_list = [n.strip() for n in negative_prompts.strip().split('\n') if n.strip()] if negative_prompts else []
 
-        # Check if we should use directory or lora_names
-        if lora_directory and lora_directory != "(use lora_names field)":
-            # Scan directory for LoRA files
-            lora_list = []
-            if os.path.exists(lora_directory):
-                for file in os.listdir(lora_directory):
-                    if file.endswith(('.safetensors', '.ckpt', '.pt', '.bin')):
-                        lora_list.append(file)
-                lora_list.sort()  # Sort alphabetically
-        else:
-            # Use lora_names field
-            lora_list = [l.strip() for l in lora_names.strip().split('\n') if l.strip()]
+        lora_list = self._get_lora_list(lora_directory, lora_names)
+        negative_list = self._normalize_negative_list(negative_list, len(prompt_list))
 
-        # If no negative prompts, use empty string for all
-        if not negative_list:
-            negative_list = [""] * len(prompt_list)
-        # If fewer negative prompts than positive, repeat the last one
-        elif len(negative_list) < len(prompt_list):
-            negative_list.extend([negative_list[-1]] * (len(prompt_list) - len(negative_list)))
-
-        # If no prompts provided, use empty string
         if not prompt_list:
-            prompt_list = [""]
-            negative_list = [""]
+            prompt_list, negative_list = [""], [""]
 
-        models_out = []
-        clips_out = []
-
-        # Get LoRA paths
         lora_paths = folder_paths.get_folder_paths("loras")
+        outputs = {"models": [], "clips": [], "positive": [], "negative": [], "lora_names": []}
 
-        def find_lora_file(lora_name):
-            """Search for LoRA file in main folder and subfolders"""
-            # Add extensions if not present
-            possible_names = [lora_name]
-            if not lora_name.endswith(('.safetensors', '.ckpt', '.pt', '.bin')):
-                possible_names.extend([
-                    f"{lora_name}.safetensors",
-                    f"{lora_name}.ckpt",
-                    f"{lora_name}.pt",
-                    f"{lora_name}.bin"
-                ])
-
-            for base_path in lora_paths:
-                for name in possible_names:
-                    # Try direct path first
-                    direct_path = os.path.join(base_path, name)
-                    if os.path.exists(direct_path):
-                        return direct_path
-
-                    # Search in subfolders
-                    for root, dirs, files in os.walk(base_path):
-                        if name in files:
-                            return os.path.join(root, name)
-            return None
-
-        # Parse LoRA entries to extract name and strength
-        def parse_lora_entry(lora_entry):
-            """Parse LoRA entry in format <lora:name:strength> or just name"""
-            pattern = r'<lora:([^:>]+):([0-9.]+)>'
-            match = re.match(pattern, lora_entry)
-            if match:
-                return match.group(1), float(match.group(2))
-            else:
-                return lora_entry, None  # Use default strength
-
-        # If no LoRAs, just return models and clips for each prompt
         if not lora_list:
-            for i, pos_prompt in enumerate(prompt_list):
-                models_out.append(model)
-                clips_out.append(clip)
-            return (models_out, clips_out)
+            return self._process_without_loras(model, clip, prompt_list, negative_list)
 
-        # Generate all combinations: prompts × LoRAs
         for lora_entry in lora_list:
-            lora_name, custom_strength = parse_lora_entry(lora_entry)
+            lora_name, custom_strength = self._parse_lora_entry(lora_entry, re)
+            lora_file_path = self._find_lora_path(lora_name, lora_directory, lora_paths, os)
 
-            # If using directory, construct full path directly
-            if lora_directory and lora_directory != "(use lora_names field)":
-                lora_file_path = os.path.join(lora_directory, lora_name)
-                if not os.path.exists(lora_file_path):
-                    lora_file_path = None
-            else:
-                # Find LoRA file in folder or subfolders
-                lora_file_path = find_lora_file(lora_name)
-
-            if lora_file_path is None:
+            if not lora_file_path:
                 print(f"Warning: LoRA file not found: {lora_name}")
                 continue
 
-            # Load the LoRA
-            import comfy.utils
-            import comfy.sd
+            model_lora, clip_lora = self._load_lora(lora_file_path, model, clip,
+                                                     custom_strength or lora_strength_model,
+                                                     custom_strength or lora_strength_clip)
 
-            lora = comfy.utils.load_torch_file(lora_file_path, safe_load=True)
-
-            # Use custom strength if provided, otherwise use default
-            strength_model = custom_strength if custom_strength is not None else lora_strength_model
-            strength_clip = custom_strength if custom_strength is not None else lora_strength_clip
-
-            model_lora, clip_lora = comfy.sd.load_lora_for_models(
-                model, clip,
-                lora,
-                strength_model,
-                strength_clip
-            )
-
-            # For each prompt with this LoRA
             for i, pos_prompt in enumerate(prompt_list):
-                neg_prompt = negative_list[i] if i < len(negative_list) else ""
+                self._add_outputs(outputs, model_lora, clip_lora, pos_prompt,
+                                negative_list[i] if i < len(negative_list) else "", lora_name)
 
-                # Encode prompts with the LoRA-modified CLIP
-                tokens = clip_lora.tokenize(pos_prompt)
-                cond, pooled = clip_lora.encode_from_tokens(tokens, return_pooled=True)
+        return tuple(outputs.values())
 
-                neg_tokens = clip_lora.tokenize(neg_prompt)
-                neg_cond, neg_pooled = clip_lora.encode_from_tokens(neg_tokens, return_pooled=True)
+    @staticmethod
+    def _get_lora_list(lora_directory, lora_names):
+        import os
+        if lora_directory and lora_directory != "(use lora_names field)":
+            if os.path.exists(lora_directory):
+                lora_list = [f for f in os.listdir(lora_directory)
+                           if f.endswith(('.safetensors', '.ckpt', '.pt', '.bin'))]
+                return sorted(lora_list)
+            return []
+        return [l.strip() for l in lora_names.strip().split('\n') if l.strip()]
 
-                models_out.append(model_lora)
-                clips_out.append(clip_lora)
+    @staticmethod
+    def _normalize_negative_list(negative_list, prompt_count):
+        if not negative_list:
+            return [""] * prompt_count
+        if len(negative_list) < prompt_count:
+            negative_list.extend([negative_list[-1]] * (prompt_count - len(negative_list)))
+        return negative_list
 
-        return (models_out, clips_out)
+    @staticmethod
+    def _parse_lora_entry(lora_entry, re):
+        match = re.match(r'<lora:([^:>]+):([0-9.]+)>', lora_entry)
+        return (match.group(1), float(match.group(2))) if match else (lora_entry, None)
+
+    @staticmethod
+    def _find_lora_path(lora_name, lora_directory, lora_paths, os):
+        if lora_directory and lora_directory != "(use lora_names field)":
+            path = os.path.join(lora_directory, lora_name)
+            return path if os.path.exists(path) else None
+
+        extensions = ('.safetensors', '.ckpt', '.pt', '.bin')
+        possible_names = [lora_name]
+        if not lora_name.endswith(extensions):
+            possible_names.extend([f"{lora_name}{ext}" for ext in extensions])
+
+        for base_path in lora_paths:
+            for name in possible_names:
+                direct_path = os.path.join(base_path, name)
+                if os.path.exists(direct_path):
+                    return direct_path
+
+                for root, _, files in os.walk(base_path):
+                    if name in files:
+                        return os.path.join(root, name)
+        return None
+
+    @staticmethod
+    def _load_lora(lora_file_path, model, clip, strength_model, strength_clip):
+        import comfy.utils
+        import comfy.sd
+        lora = comfy.utils.load_torch_file(lora_file_path, safe_load=True)
+        return comfy.sd.load_lora_for_models(model, clip, lora, strength_model, strength_clip)
+
+    def _encode_conditioning(self, clip, positive, negative):
+        pos_tokens = clip.tokenize(positive)
+        pos_cond, pos_pooled = clip.encode_from_tokens(pos_tokens, return_pooled=True)
+
+        neg_tokens = clip.tokenize(negative)
+        neg_cond, neg_pooled = clip.encode_from_tokens(neg_tokens, return_pooled=True)
+
+        return [[pos_cond, {"pooled_output": pos_pooled}]], [[neg_cond, {"pooled_output": neg_pooled}]]
+
+    def _add_outputs(self, outputs, model, clip, positive, negative, lora_name):
+        pos_cond, neg_cond = self._encode_conditioning(clip, positive, negative)
+        outputs["models"].append(model)
+        outputs["clips"].append(clip)
+        outputs["positive"].append(pos_cond)
+        outputs["negative"].append(neg_cond)
+        outputs["lora_names"].append(lora_name)
+
+    def _process_without_loras(self, model, clip, prompt_list, negative_list):
+        outputs = {"models": [], "clips": [], "positive": [], "negative": [], "lora_names": []}
+        for i, pos_prompt in enumerate(prompt_list):
+            neg_prompt = negative_list[i] if i < len(negative_list) else ""
+            self._add_outputs(outputs, model, clip, pos_prompt, neg_prompt, "no_lora")
+        return tuple(outputs.values())
 
 
-class TextCombiner:
-    """
-    Utility node to combine prompt info with LoRA name for filename generation
-    """
+class ImageAnnotator:
+    """Adds text annotations to images with LoRA names"""
 
     @classmethod
     def INPUT_TYPES(cls):
         return {
             "required": {
-                "prompt": ("STRING", {"forceInput": True}),
-                "lora_name": ("STRING", {"forceInput": True}),
-                "separator": ("STRING", {"default": "_"}),
+                "images": ("IMAGE",),
+                "lora_names": ("STRING", {"forceInput": True}),
+                "enable_annotations": ("BOOLEAN", {"default": True}),
+                "preserve_original": ("BOOLEAN", {"default": False}),
+                "font_size": ("INT", {
+                    "default": 18,
+                    "min": 8,
+                    "max": 128,
+                    "step": 1
+                }),
             }
         }
 
-    RETURN_TYPES = ("STRING",)
-    FUNCTION = "combine"
+    RETURN_TYPES = ("IMAGE",)
+    RETURN_NAMES = ("images",)
+    INPUT_IS_LIST = (True, True, False, False, False)
+    OUTPUT_IS_LIST = (True,)
+    FUNCTION = "annotate_images"
     CATEGORY = "testing"
 
-    def combine(self, prompt, lora_name, separator="_"):
-        # Clean strings for filename
-        import re
-        clean_prompt = re.sub(r'[^\w\s-]', '', prompt)[:50]
-        clean_prompt = re.sub(r'[\s]+', '_', clean_prompt)
-        clean_lora = lora_name.replace('.safetensors', '').replace('.ckpt', '')
+    def annotate_images(self, images, lora_names, enable_annotations, preserve_original, font_size):
+        import torch
+        import numpy as np
+        from PIL import Image, ImageDraw, ImageFont
 
-        return (f"{clean_lora}{separator}{clean_prompt}",)
+        enable_annotations = enable_annotations[0] if isinstance(enable_annotations, list) else enable_annotations
+        preserve_original = preserve_original[0] if isinstance(preserve_original, list) else preserve_original
+        font_size = font_size[0] if isinstance(font_size, list) else font_size
+
+        print(f"[ImageAnnotator] enable_annotations={enable_annotations}, preserve_original={preserve_original}")
+        print(f"[ImageAnnotator] Processing {len(images)} images")
+
+        if not enable_annotations:
+            return (images,)
+
+        font = self._load_font(ImageFont, font_size)
+        output_images = []
+
+        for img_tensor, lora_name in zip(images, lora_names):
+            img_tensor_squeezed = img_tensor.squeeze(0) if img_tensor.dim() == 4 and img_tensor.shape[0] == 1 else img_tensor
+            pil_img = self._tensor_to_pil(img_tensor_squeezed, np, Image)
+            annotated_tensor = self._create_annotated_image(pil_img, lora_name, font, ImageDraw, np, torch)
+
+            if preserve_original:
+                output_images.extend([img_tensor, annotated_tensor])
+            else:
+                output_images.append(annotated_tensor)
+
+        print(f"[ImageAnnotator] Returning {len(output_images)} images")
+        return (output_images,)
+
+    @staticmethod
+    def _load_font(ImageFont, font_size):
+        for font_name in ["arial.ttf", "DejaVuSans.ttf"]:
+            try:
+                return ImageFont.truetype(font_name, font_size)
+            except:
+                continue
+        return ImageFont.load_default()
+
+    @staticmethod
+    def _tensor_to_pil(img_tensor, np, Image):
+        img_np = (img_tensor.cpu().numpy() * 255).astype(np.uint8)
+        return Image.fromarray(img_np, mode='RGB')
+
+    @staticmethod
+    def _create_annotated_image(pil_img, text, font, ImageDraw, np, torch):
+        annotated_img = pil_img.copy()
+        draw = ImageDraw.Draw(annotated_img)
+
+        bbox = draw.textbbox((0, 0), text, font=font)
+        text_width, text_height = bbox[2] - bbox[0], bbox[3] - bbox[1]
+
+        padding = 5
+        x, y = padding, pil_img.height - text_height - padding * 2
+
+        draw.rectangle(
+            [(x - padding, y - padding), (x + text_width + padding, y + text_height + padding)],
+            fill="black"
+        )
+        draw.text((x, y), text, fill="white", font=font)
+
+        annotated_np = np.array(annotated_img).astype(np.float32) / 255.0
+        return torch.from_numpy(annotated_np).unsqueeze(0)
 
 
-# Node class mappings
 NODE_CLASS_MAPPINGS = {
     "PromptLoraTestBench": PromptLoraTestBench,
-    "TextCombiner": TextCombiner,
+    "ImageAnnotator": ImageAnnotator,
 }
 
-# Node display name mappings
 NODE_DISPLAY_NAME_MAPPINGS = {
     "PromptLoraTestBench": "Prompt & LoRA Test Bench",
+    "ImageAnnotator": "Image Annotator",
     "TextCombiner": "Text Combiner",
 }
