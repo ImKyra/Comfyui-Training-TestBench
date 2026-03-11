@@ -2,6 +2,13 @@
 
 Extension for ComfyUI to automatically test multiple prompts with multiple LoRAs.
 
+![Main workflow](resources/main.png)
+
+Output with no LoRA:
+![Image Annotator example](resources/nolora.png)
+Output with 2 LoRAs:
+![Double output example](resources/double_lora.png)
+
 ## Installation
 
 Place this folder in `ComfyUI/custom_nodes/`
@@ -28,6 +35,8 @@ This node automatically generates all combinations of prompts and LoRAs for batc
 - `lora_directory`: Directory to scan for LoRAs, or use "(use lora_names field)" to manually list
 - `lora_strength_model`: LoRA strength for the model (default: 1.0, range: -20.0 to 20.0)
 - `lora_strength_clip`: LoRA strength for CLIP (default: 1.0, range: -20.0 to 20.0)
+- `lora_range_start`: Filter LoRAs by number in filename (0 = disabled, e.g., 2000)
+- `lora_range_end`: Filter LoRAs by number in filename (0 = disabled, e.g., 4000)
 - `prompt` (optional input): Single prompt override
 - `negative_prompt` (optional input): Single negative prompt override
 
@@ -122,6 +131,11 @@ Enhanced image saving node that embeds prompt and LoRA information in PNG metada
 - Set `lora_directory` to a path to auto-scan that folder
 - All `.safetensors`, `.ckpt`, `.pt`, `.bin` files are loaded automatically
 - Overrides `lora_names` field when directory is selected
+- **LoRA range filtering**: Use `lora_range_start` and `lora_range_end` to filter by numbers in filenames
+  - Example: Files named `model_000007420.safetensors` to `model_000007630.safetensors`
+  - Set range to `7420` - `7630` to load only those files
+  - Filter extracts the largest number from each filename
+  - Both values set to `0` = disabled (loads all LoRAs)
 
 **Special features:**
 - Works without LoRAs: outputs combinations with `no_lora` label
@@ -158,6 +172,14 @@ Result: 2 images with different LoRA strengths
 lora_directory: E:\ComfyUI\models\loras\characters
 ```
 Result: All LoRAs in that folder × all prompts
+
+**Using directory mode with range filter:**
+```
+lora_directory: E:\ComfyUI\models\loras\training
+lora_range_start: 7420
+lora_range_end: 7630
+```
+Result: Only LoRAs with numbers 7420-7630 in their filenames × all prompts
 
 ## Notes
 
