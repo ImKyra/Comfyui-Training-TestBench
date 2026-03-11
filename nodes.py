@@ -58,9 +58,9 @@ class PromptLoraTestBench:
             }
         }
 
-    RETURN_TYPES = ("MODEL", "CLIP", "CONDITIONING", "CONDITIONING", "STRING")
-    RETURN_NAMES = ("model", "clip", "positive", "negative", "lora_names")
-    OUTPUT_IS_LIST = (True, True, True, True, True)
+    RETURN_TYPES = ("MODEL", "CLIP", "CONDITIONING", "CONDITIONING", "STRING", "STRING", "STRING")
+    RETURN_NAMES = ("model", "clip", "positive", "negative", "lora_names", "prompts", "negative_prompts")
+    OUTPUT_IS_LIST = (True, True, True, True, True, True, True)
     FUNCTION = "generate_combinations"
     CATEGORY = "testing"
 
@@ -84,7 +84,7 @@ class PromptLoraTestBench:
             prompt_list, negative_list = [""], [""]
 
         lora_paths = folder_paths.get_folder_paths("loras")
-        outputs = {"models": [], "clips": [], "positive": [], "negative": [], "lora_names": []}
+        outputs = {"models": [], "clips": [], "positive": [], "negative": [], "lora_names": [], "prompts": [], "negative_prompts": []}
 
         if not lora_list:
             return self._process_without_loras(model, clip, prompt_list, negative_list)
@@ -102,8 +102,8 @@ class PromptLoraTestBench:
                                                      custom_strength or lora_strength_clip)
 
             for i, pos_prompt in enumerate(prompt_list):
-                self._add_outputs(outputs, model_lora, clip_lora, pos_prompt,
-                                negative_list[i] if i < len(negative_list) else "", lora_name)
+                neg_prompt = negative_list[i] if i < len(negative_list) else ""
+                self._add_outputs(outputs, model_lora, clip_lora, pos_prompt, neg_prompt, lora_name)
 
         return tuple(outputs.values())
 
@@ -176,9 +176,11 @@ class PromptLoraTestBench:
         outputs["positive"].append(pos_cond)
         outputs["negative"].append(neg_cond)
         outputs["lora_names"].append(lora_name)
+        outputs["prompts"].append(positive)
+        outputs["negative_prompts"].append(negative)
 
     def _process_without_loras(self, model, clip, prompt_list, negative_list):
-        outputs = {"models": [], "clips": [], "positive": [], "negative": [], "lora_names": []}
+        outputs = {"models": [], "clips": [], "positive": [], "negative": [], "lora_names": [], "prompts": [], "negative_prompts": []}
         for i, pos_prompt in enumerate(prompt_list):
             neg_prompt = negative_list[i] if i < len(negative_list) else ""
             self._add_outputs(outputs, model, clip, pos_prompt, neg_prompt, "no_lora")
@@ -278,13 +280,128 @@ class ImageAnnotator:
         return torch.from_numpy(annotated_np).unsqueeze(0)
 
 
+class ImageSaverWithMetadata:
+    """Saves images with prompt and LoRA metadata embedded in PNG"""
+
+    @classmethod
+    def INPUT_TYPES(cls):
+        return {
+            "required": {
+                "images": ("IMAGE",),
+                "filename_prefix": ("STRING", {"default": "ComfyUI"}),
+            },
+            "optional": {
+                "prompts": ("STRING", {"forceInput": True}),
+                "negative_prompts": ("STRING", {"forceInput": True}),
+                "lora_names": ("STRING", {"forceInput": True}),
+            }
+        }
+
+    RETURN_TYPES = ()
+    FUNCTION = "save_images"
+    OUTPUT_NODE = True
+    INPUT_IS_LIST = (True, False, True, True, True)
+    CATEGORY = "testing"
+
+    def save_images(self, images, filename_prefix, prompts=None, negative_prompts=None, lora_names=None):
+        import torch
+        import numpy as np
+        from PIL import Image, PngImagePlugin
+        import folder_paths
+        import os
+        import json
+
+        filename_prefix = filename_prefix[0] if isinstance(filename_prefix, list) else filename_prefix
+        output_dir = folder_paths.get_output_directory()
+
+        # Create subfolder if prefix contains path separators
+        if os.sep in filename_prefix or '/' in filename_prefix:
+            filename_prefix = filename_prefix.replace('/', os.sep)
+            subfolder = os.path.dirname(filename_prefix)
+            filename_prefix = os.path.basename(filename_prefix)
+            output_dir = os.path.join(output_dir, subfolder)
+            os.makedirs(output_dir, exist_ok=True)
+
+        results = []
+        counter = self._get_next_counter(output_dir, filename_prefix)
+
+        for idx, img_tensor in enumerate(images):
+            # Convert tensor to PIL Image
+            img_tensor_squeezed = img_tensor.squeeze(0) if img_tensor.dim() == 4 and img_tensor.shape[0] == 1 else img_tensor
+            img_np = (img_tensor_squeezed.cpu().numpy() * 255).astype(np.uint8)
+            pil_img = Image.fromarray(img_np, mode='RGB')
+
+            # Prepare metadata
+            metadata = PngImagePlugin.PngInfo()
+
+            if prompts and idx < len(prompts):
+                metadata.add_text("prompt", prompts[idx])
+
+            if negative_prompts and idx < len(negative_prompts):
+                metadata.add_text("negative_prompt", negative_prompts[idx])
+
+            if lora_names and idx < len(lora_names):
+                metadata.add_text("lora", lora_names[idx])
+
+            # Add combined metadata as JSON for easier parsing
+            combined_metadata = {}
+            if prompts and idx < len(prompts):
+                combined_metadata["prompt"] = prompts[idx]
+            if negative_prompts and idx < len(negative_prompts):
+                combined_metadata["negative_prompt"] = negative_prompts[idx]
+            if lora_names and idx < len(lora_names):
+                combined_metadata["lora"] = lora_names[idx]
+
+            if combined_metadata:
+                metadata.add_text("parameters", json.dumps(combined_metadata, indent=2))
+
+            # Save image
+            filename = f"{filename_prefix}_{counter:05d}.png"
+            filepath = os.path.join(output_dir, filename)
+            pil_img.save(filepath, pnginfo=metadata, compress_level=4)
+
+            results.append({
+                "filename": filename,
+                "subfolder": os.path.relpath(output_dir, folder_paths.get_output_directory()),
+                "type": "output"
+            })
+
+            counter += 1
+
+        print(f"[ImageSaverWithMetadata] Saved {len(results)} images to {output_dir}")
+        return {"ui": {"images": results}}
+
+    @staticmethod
+    def _get_next_counter(output_dir, prefix):
+        """Find the next available counter for filenames"""
+        import os
+        import re
+
+        if not os.path.exists(output_dir):
+            return 1
+
+        existing_files = [f for f in os.listdir(output_dir) if f.startswith(prefix) and f.endswith('.png')]
+        if not existing_files:
+            return 1
+
+        counters = []
+        pattern = re.compile(rf"{re.escape(prefix)}_(\d+)\.png")
+        for f in existing_files:
+            match = pattern.match(f)
+            if match:
+                counters.append(int(match.group(1)))
+
+        return max(counters) + 1 if counters else 1
+
+
 NODE_CLASS_MAPPINGS = {
     "PromptLoraTestBench": PromptLoraTestBench,
     "ImageAnnotator": ImageAnnotator,
+    "ImageSaverWithMetadata": ImageSaverWithMetadata,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "PromptLoraTestBench": "Prompt & LoRA Test Bench",
     "ImageAnnotator": "Image Annotator",
-    "TextCombiner": "Text Combiner",
+    "ImageSaverWithMetadata": "Save Images with Metadata",
 }
