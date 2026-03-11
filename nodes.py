@@ -51,6 +51,20 @@ class PromptLoraTestBench:
                     "max": 20.0,
                     "step": 0.01
                 }),
+                "lora_range_start": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 999999,
+                    "step": 1,
+                    "tooltip": "Filter by number in filename (0 = disabled)"
+                }),
+                "lora_range_end": ("INT", {
+                    "default": 0,
+                    "min": 0,
+                    "max": 999999,
+                    "step": 1,
+                    "tooltip": "Filter by number in filename (0 = disabled)"
+                }),
             },
             "optional": {
                 "prompt": ("STRING", {"forceInput": True}),
@@ -66,6 +80,7 @@ class PromptLoraTestBench:
 
     def generate_combinations(self, model, clip, prompts, negative_prompts, lora_names,
                             lora_directory, lora_strength_model, lora_strength_clip,
+                            lora_range_start, lora_range_end,
                             prompt=None, negative_prompt=None):
         import os
         import folder_paths
@@ -78,6 +93,7 @@ class PromptLoraTestBench:
         negative_list = [n.strip() for n in negative_prompts.strip().split('\n') if n.strip()] if negative_prompts else []
 
         lora_list = self._get_lora_list(lora_directory, lora_names)
+        lora_list = self._apply_range_filter(lora_list, lora_range_start, lora_range_end)
         negative_list = self._normalize_negative_list(negative_list, len(prompt_list))
 
         if not prompt_list:
@@ -117,6 +133,32 @@ class PromptLoraTestBench:
                 return sorted(lora_list)
             return []
         return [l.strip() for l in lora_names.strip().split('\n') if l.strip()]
+
+    @staticmethod
+    def _apply_range_filter(lora_list, start, end):
+        """Filter LoRA list by numbers found in filenames."""
+        import re
+
+        if start <= 0 and end <= 0:
+            return lora_list
+
+        filtered = []
+        for lora_name in lora_list:
+            # Extract all numbers from filename
+            numbers = re.findall(r'\d+', lora_name)
+            if numbers:
+                # Use the largest number found (typically the step/epoch number)
+                max_num = max(int(n) for n in numbers)
+
+                # Check if within range
+                start_ok = (start <= 0) or (max_num >= start)
+                end_ok = (end <= 0) or (max_num <= end)
+
+                if start_ok and end_ok:
+                    filtered.append(lora_name)
+
+        print(f"[LoRA Range Filter] Applied range {start}-{end}: {len(filtered)} of {len(lora_list)} LoRAs selected")
+        return filtered
 
     @staticmethod
     def _normalize_negative_list(negative_list, prompt_count):
