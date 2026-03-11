@@ -93,7 +93,9 @@ class PromptLoraTestBench:
         negative_list = [n.strip() for n in negative_prompts.strip().split('\n') if n.strip()] if negative_prompts else []
 
         lora_list = self._get_lora_list(lora_directory, lora_names)
-        lora_list = self._apply_range_filter(lora_list, lora_range_start, lora_range_end)
+        # Only apply range filter when using directory listing, not when using lora_names field
+        if lora_directory and lora_directory != "(use lora_names field)":
+            lora_list = self._apply_range_filter(lora_list, lora_range_start, lora_range_end)
         negative_list = self._normalize_negative_list(negative_list, len(prompt_list))
 
         if not prompt_list:
