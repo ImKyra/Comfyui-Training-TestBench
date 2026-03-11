@@ -33,8 +33,8 @@ This node automatically generates all combinations of prompts and LoRAs for batc
 - `negative_prompts`: List of negative prompts (one per line, optional)
 - `lora_names`: List of LoRA names (one per line, **extensions optional**)
 - `lora_directory`: Directory to scan for LoRAs, or use "(use lora_names field)" to manually list
-- `lora_strength_model`: LoRA strength for the model (default: 1.0, range: -20.0 to 20.0)
-- `lora_strength_clip`: LoRA strength for CLIP (default: 1.0, range: -20.0 to 20.0)
+- `lora_strength_model`: LoRA strength for the model
+- `lora_strength_clip`: LoRA strength for CLIP
 - `prompt` (optional input): Single prompt override
 - `negative_prompt` (optional input): Single negative prompt override
 
